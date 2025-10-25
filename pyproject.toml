@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel", "build"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fips"
+version = "0.1.0"
+description = "Reference FIPS post-quantum algorithms - Dilithium (ML-DSA)"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Aditya Pratap Singh", email = "thisisaditya.me@gmail.com" }]
+requires-python = ">=3.9"
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["fips*"]
+
+[tool.setuptools]
+# optional extras
