@@ -18,3 +18,7 @@ include = ["fips*"]
 
 [tool.setuptools]
 # optional extras
+
+[project.urls]
+Homepage = "https://github.com/kyuuaditya/fips"
+Issues = "https://github.com/kyuuaditya/fips/issues"
