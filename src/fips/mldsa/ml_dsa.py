@@ -410,7 +410,7 @@ class MLDSA:
         
         return (self.convert.infinity_norm(z) < (self.gamma1 - self.beta)) and (c_hash_encoded == c_tilda)
 
-    def ml_dsa_verify(self, public_key: bytes, message, signature: bytes, ctx: bytes) -> bool:
+    def ml_dsa_verify(self, public_key: bytes, message, signature: bytes, ctx = None) -> bool:
         """
         Algorithm 3 FIPS 204
 
@@ -434,6 +434,8 @@ class MLDSA:
             raise ValueError("message must be a bit string.")
         if not isinstance(signature, bytes):
             raise ValueError("Invalid signature format.")
+        if ctx is None:
+            return False
         if not isinstance(ctx, bytes):
             raise TypeError("Invalid context format.")
         if len(ctx) > 255:

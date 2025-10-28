@@ -19,6 +19,7 @@ class Sample:
 
         self.convert = Conversion()
         self.packing = Packing(self.omega, self.k)
+        self.rejections = 0
 
     def CoeffFromThreeBytes(self, b0: int, b1: int, b2:int) -> int:
         """
@@ -84,13 +85,14 @@ class Sample:
         # line 3: hash rho with the shake_128 object ; # G.Abosrb(ctx, rho).
         ctx.update(rho)
 
-        byte_stream = ctx.digest(self.N * 3) # store the hash in byte_stream for faster calling.
+        byte_stream = ctx.digest(894) # store the hash in byte_stream for faster calling.
         byte_position = 0 # temprary variable to keep track of position in byte_stream.
         
         # line 4: main rejection loop.
         while j < 256:
             if byte_position + 3 > len(byte_stream): # to prevent byte_stream from going out of index.
                 byte_stream += ctx.digest(self.N)
+                print("ran out of bytes in rejection sampling! - max 894 bytes allowed")
 
             # line 5: take out next 3 bytes form the hash ; G.squeeze(ctx, 3).
             selected_3_bytes = byte_stream[byte_position : byte_position + 3]
