@@ -23,7 +23,6 @@ class MLDSA:
         
         self.beta = self.tau * self.eta
 
-        # ! initialize all other classes here later.
         self.convert = Conversion()
         self.sample = Sample(self.eta, self.gamma1, self.k, self.l, self._lambda_, self.tau, self.omega) 
         self.ntt = NTT()
@@ -91,7 +90,7 @@ class MLDSA:
         K_seed = Hash_result[96:]       # c. Get K_seed:            The last 32 bytes
 
         # line 3: generate the matrix A (k x l) and store polynomials as list of coefficients.
-        A_cap = self.sample.expand_A(rho)
+        A_hat = self.sample.expand_A(rho)
 
         # line 4: generate and store s1 and s2 polynomial vectors.
         s1, s2 = self.sample.expand_S(rho_prime)
@@ -100,16 +99,11 @@ class MLDSA:
             # a. Transform s₁ into the NTT domain
         s1_ntt = [self.ntt.NTT(p) for p in s1] 
             # b. Compute the matrix-vector product Â ◦ NTT(s₁)
-        product_ntt = [[0] * self.N for _ in range(self.k)] # initialize product of A_cap and NTT(s1)
-        for i in range(self.k):
-            for j in range(self.l):
-                temprary_list = self.ntt.MultiplyNTT(A_cap[i][j], s1_ntt[j])
-                for k in range(self.N):
-                    product_ntt[i][k] = (product_ntt[i][k] + temprary_list[k]) % self.q
+        product_A_s1_ntt = self.ntt.multiply_matrix_vector(A_hat, s1_ntt)
             # c. Transform the result back from the NTT domain
-        product_ntt_inv = [self.ntt.inv_NTT(p) for p in product_ntt]
+        product_A_s1 = [self.ntt.inv_NTT(p) for p in product_A_s1_ntt]
             # d. Add the second secret vector s₂
-        t_vec = [self.ntt.AddNTT(product_ntt_inv[i], s2[i]) for i in range(self.k)]
+        t_vec = [self.ntt.AddNTT(product_A_s1[i], s2[i]) for i in range(self.k)]
 
         # line 6: decompose t into (t1, t0) such that r = (r1.2^d + r0) mod q
         t1_vector, t0_vector = self.ntt.power2round_vec(t_vec)
@@ -148,7 +142,7 @@ class MLDSA:
         # 5: return ML-DSA.KeyGen_internal(ξ)
         return self.ml_dsa_keygen_internal(random_32_byte_seed)
 
-    def ml_dsa_sign_internal(self, private_key: bytes, Message, input_seed):
+    def ml_dsa_sign_internal(self, private_key: bytes, Message: bytes, input_seed):
         """
         Algorithm 7 FIPS 204
         
@@ -171,24 +165,25 @@ class MLDSA:
             raise TypeError("Invalid random seed format.")
         if len(input_seed) != 32:
             raise ValueError("Invalid random seed length.")
-        if not isinstance (Message, str):
+        if not (isinstance (Message, (bytes, bytearray)) or isinstance (Message, str) or all(bit in ('0', '1') for bit in Message)):
             raise TypeError("Invalid message format.")
-        if not all(bit in ('0', '1') for bit in Message):
-            raise ValueError("Message must be a bit string.")
+        
+        if not isinstance (Message, (bytes, bytearray)): # convert the message to bytes if recived in bits.
+            Message = self.convert.bits_to_bytes(Message)
 
         # line 1: breaking the private key into 6 sub bytestrings.
         rho, K_seed, tr, s1_vec, s2_vec, t0_vec = self.encode.sk_decode(private_key)
 
         # line 2 to 4: performing polynomial wise NTT conversion.
-        s1_cap = [self.ntt.NTT(p) for p in s1_vec]
-        s2_cap = [self.ntt.NTT(p) for p in s2_vec]
-        t0_cap = [self.ntt.NTT(p) for p in t0_vec]
+        s1_ntt = [self.ntt.NTT(p) for p in s1_vec]
+        s2_ntt = [self.ntt.NTT(p) for p in s2_vec]
+        t0_ntt = [self.ntt.NTT(p) for p in t0_vec]
 
         # line 5: sample a k x l matrix from input seed rho.
         A_hat = self.sample.expand_A(rho)
 
         # line 6: hash the message after concatenating it after tr with shake 256 into a 64-bytes bytestring.
-        mew = self.convert.H(self.convert.bits_to_bytes(self.convert.bytes_to_bits(tr) + Message), 64)
+        mew = self.convert.H(tr + Message, 64)
         
         # line 7: compute a private random seed by hashing (K + input random seed + mew) with shake 256 into a 64-byte bytestring.
         rho_prime_prime = self.convert.H(K_seed + input_seed + mew, 64)
@@ -205,17 +200,13 @@ class MLDSA:
             y = self.sample.expand_mask(rho_prime_prime, kappa)
 
             # line 12: create a vector of k polynomials by multiplying A and y in NTT domain.
-            y_copy = [[y[i][j] for j in range (self.N)] for i in range (self.l)] # create a copy of vector y.
-            y_ntt = [self.ntt.NTT(p) for p in y_copy] # apply the NTT conversion on copy of vector y.
-
-            product_ntt = [[0] * self.N for _ in range(self.k)] # temporary vector to store result of NTT conversion.
-            for i in range(self.k):
-                for j in range(self.l): # temporary polynomial to store result of each multiplication in the loop.
-                    temprary_list = self.ntt.MultiplyNTT(A_hat[i][j], y_ntt[j]) 
-                    for k in range(self.N): # take sum of all temporary polynomials.
-                        product_ntt[i][k] = (product_ntt[i][k] + temprary_list[k]) % self.q 
+            y_ntt = [self.ntt.NTT(p) for p in y] # apply the NTT conversion on copy of vector y.
             
-            w = [self.ntt.inv_NTT(p) for p in product_ntt] # NTT inverse function applied on the temporary the temporary vector.
+            # compute: A . NTT(y)
+            product_A_y = self.ntt.multiply_matrix_vector(A_hat, y_ntt)
+            
+            # return A . NTT(y) back to polynomial form.
+            w = [self.ntt.inv_NTT(p) for p in product_A_y] # NTT inverse function applied on the temporary the temporary vector.
 
             # line 13 and 14: component wise conversion to high bits.
             w_1 = [[self.operation.highBits(w[i][j]) for j in range (self.N)] for i in range (self.k)]
@@ -227,62 +218,56 @@ class MLDSA:
             c = self.sample.SampleInBall(c_tilda)
 
             # line 17: convert polynomial c into NTT domain.
-            c_copy = [c[j] for j in range (self.N)] # create a copy of the polynomial c.
-            c_ntt  = self.ntt.NTT(c_copy) # apply the NTT conversion on copy of polynomial c.
+            c_ntt  = self.ntt.NTT(c) # apply the NTT conversion on copy of polynomial c.
 
-            # line 18: multiply polynomial c_ntt [256] with matrix s1 [l][256] int NTT domain and apply NTT inverse.
-            product_cs1 = [[0] * self.N for _ in range(self.l)] # initialize cs1
-            for j in range(self.l): # temporary polynomial to store result of each multiplication in the loop.
-                temprary_list = self.ntt.MultiplyNTT(c_ntt, s1_cap[j])
-                for k in range(self.N): # take sum of all temporary polynomials.
-                    product_cs1[j][k] = temprary_list[k] % self.q
+            # line 18: multiply polynomial c_ntt [256] with vector s1 [l][256] int NTT domain and apply NTT inverse.
+            product_c_s1_ntt = self.ntt.multiply_polynomial_vector(c_ntt, s1_ntt)
 
-            product_cs1_inv = [self.ntt.inv_NTT(p) for p in product_cs1] # NTT inverse function applied on temporary vector.
+            # take product_c_s1 back to polynomial form.
+            product_c_s1 = [self.ntt.inv_NTT(p) for p in product_c_s1_ntt] # NTT inverse function applied on temporary vector.
 
-            # line 19: multiply polynomial c_ntt [256] with matrix s2 [k][256] in NTT domain and apply NTT inverse.
-            product_cs2 = [[0] * self.N for _ in range(self.k)] # initialize cs2
-            for j in range(self.k): # temporary polynomial to store resutl of each multiplicaiton in the loop.
-                temprary_list = self.ntt.MultiplyNTT(c_ntt, s2_cap[j])
-                for k in range(self.N): # take sum of all temporary polynomials.
-                    product_cs2 [j][k] =  temprary_list[k] % self.q        
+            # line 19: multiply polynomial c_ntt [256] with vector s2 [k][256] in NTT domain and apply NTT inverse.
+            product_c_s2_ntt = self.ntt.multiply_polynomial_vector(c_ntt, s2_ntt)
 
-            product_cs2_inv = [self.ntt.inv_NTT(p) for p in product_cs2] # NTT inverse function applied on temporary vector.
+            # return product_c_s2 back to polynomial form. 
+            product_c_s2 = [self.ntt.inv_NTT(p) for p in product_c_s2_ntt] # NTT inverse function applied on temporary vector.
 
             # line 20: sum of 2 vectors of polynomials.
-            z = [[0] * self.N for _ in range(self.l)] # initialize the empty vector.
-            for i in range(self.l):
-                for j in range(self.N):
-                    z[i][j] = (y[i][j] + product_cs1_inv[i][j]) % self.q
+            z = self.ntt.AddPolynomialVectors(y, product_c_s1)
+
+            neg_product_c_s2 = self.ntt.multiply_scalar_vector(-1, product_c_s2)
+            sum_w_neg_product_c_s2 = self.ntt.AddPolynomialVectors(w, neg_product_c_s2)
 
             # line 21 and 22: component wise conversion to high bits after taking difference of vector w and vector cs2.
-            r0 = [[0] * self.N for _ in range(self.k)] # initialize the empty vector.
-            for i in range(self.k):
-                for j in range(self.N):
-                    r0[i][j] = self.operation.lowBits((w[i][j] - product_cs2_inv[i][j]) % self.q)
+            r0 = self.operation.lowBits_vector(sum_w_neg_product_c_s2)
 
             # line 23: check l infinity norm for z and r0 
             if ((self.convert.infinity_norm(z) >= self.gamma1 - self.beta) or (self.convert.infinity_norm(r0) >= self.gamma2 - self.beta)): # main rejection loop terminates for else case here.
                 z = None
                 h = None
+
             # line 24: it's literally just an "else" statement.
             else:
-                # line 25: multiply polynomial c_ntt [256] with matrix t0 [k][256] int NTT domain and apply NTT inverse.
-                product_ct0 = [[0] * self.N for _ in range(self.k)] # initialize ct0
-                for j in range(self.k): # temporary polynomial to store result of each multiplication in the loop.
-                    temprary_list = self.ntt.MultiplyNTT(c_ntt, t0_cap[j])
-                    for k in range(self.N): # take sum of all temporary polynomials.
-                        product_ct0[j][k] = temprary_list[k] % self.q
 
-                product_ct0_inv = [self.ntt.inv_NTT(p) for p in product_ct0] # NTT inverse function applied on temporary vector.
+                # line 25: multiply polynomial c_ntt [256] with vector t0 [k][256] int NTT domain and apply NTT inverse.
+                product_c_t0_ntt = self.ntt.multiply_polynomial_vector(c_ntt, t0_ntt)
+
+                # return back to polynomial form.
+                product_c_t0 = [self.ntt.inv_NTT(p) for p in product_c_t0_ntt] # NTT inverse function applied on temporary vector.
 
                 # line 26 and 27: apply make hint componentwise everywehre to obtain vector binary polynomial h.
+                neg_product_c_t0 = self.ntt.multiply_scalar_vector(-1, product_c_t0)
+
+                sum_w_neg_product_c_s2_product_c_t0 = self.ntt.AddPolynomialVectors(sum_w_neg_product_c_s2, product_c_t0)
+                
+                # ! ##########################################
                 h = [[0] * self.N for _ in range(self.k)] # initialize the empty vector.
                 for i in range(self.k):
                     for j in range(self.N):
-                        h[i][j] = self.operation.make_hint(-product_ct0_inv[i][j], w[i][j] - product_cs2_inv[i][j] + product_ct0_inv[i][j])
+                        h[i][j] = self.operation.make_hint(neg_product_c_t0[i][j], sum_w_neg_product_c_s2_product_c_t0[i][j])
                         # print(h)
                 # # line 28: reject if any of the 2 conditions is true.
-                if (self.convert.infinity_norm(product_ct0_inv) >= self.gamma2 or self.convert.calc_ones(h) > self.omega):
+                if (self.convert.infinity_norm(product_c_t0) >= self.gamma2 or self.convert.calc_ones(h) > self.omega):
                     z = None
                     h = None
 
@@ -314,14 +299,15 @@ class MLDSA:
         """
         if not isinstance (private_key, (bytes, bytearray)):
             raise TypeError("Invalid private key format.")
-        if not isinstance (Message, str):
-            raise TypeError("Invalid message format.")
-        if not all(bit in ('0', '1') for bit in Message):
-            raise ValueError("Message must be a bit string.")
         if not isinstance(ctx, bytes):
             raise TypeError("Invalid context format.")
         if len(ctx) > 255:
             raise ValueError(f"ctx bytes must have length at most 255, ctx has length {len(ctx) = }")
+        if not (isinstance (Message, (bytes, bytearray)) or isinstance (Message, str) or all(bit in ('0', '1') for bit in Message)):
+            raise TypeError("Invalid message format.")
+        
+        if not isinstance (Message, (bytes, bytearray)): # convert the message to bytes if recived in bits.
+            Message = self.convert.bits_to_bytes(Message)
         
         try:
             random_32_byte_seed = secrets.token_bytes(32) 
@@ -329,7 +315,7 @@ class MLDSA:
             # return none and error indication.
             print(f"Error: Failed to generate random seed. {e}")
             return None
-        Message_modified = self.convert.bytes_to_bits(self.convert.integer_to_bytes(0, 1) + self.convert.integer_to_bytes(len(ctx), 1) + ctx) + Message
+        Message_modified = self.convert.integer_to_bytes(0, 1) + self.convert.integer_to_bytes(len(ctx), 1) + ctx + Message
 
         rho = self.ml_dsa_sign_internal(private_key, Message_modified, random_32_byte_seed)
 

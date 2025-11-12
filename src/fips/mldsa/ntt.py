@@ -193,6 +193,155 @@ class NTT:
             c[i] = (a_vec[i] + b_vec[i]) % self.q
         
         return c
+    
+    def AddVectorNTT(self, vector1: list, vector2: list) -> list:
+        """
+        Adds two vectors of polynomials in NTT domain component-wise.
+        Args:
+            vector1 (list): First vector of polynomials (list of lists of ints) in NTT domain.
+            vector2 (list): Second vector of polynomials (list of lists of ints) in NTT domain.
+        Returns:
+            result (list): The resulting vector of polynomials after addition in NTT domain.
+        Raises:
+            TypeError: If the inputs are not lists or tuples.
+        """
+        if not isinstance(vector1, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for vector1, got {type(vector1)}")
+        if not isinstance(vector2, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for vector2, got {type(vector2)}")
+        if not len(vector1) == len(vector2):
+            raise ValueError("Both vectors must have the same length for addition.")
+        
+        result = [[0] * self.N for _ in range(len(vector1))] # initialize result vector
+        for i in range(len(vector1)):
+            result[i] = self.AddNTT(vector1[i], vector2[i])
+
+        return result
+    
+    def AddPolynomials(self, poly1: list, poly2: list) -> list:
+        """
+        Adds two polynomials coefficient-wise.
+        Args:
+            poly1 (list): First polynomial (list of ints).
+            poly2 (list): Second polynomial (list of ints).
+        Returns:
+            result (list): The resulting polynomial after addition.
+        Raises:
+            TypeError: If the inputs are not lists or tuples.
+        """
+        if not isinstance(poly1, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for poly1, got {type(poly1)}")
+        if not isinstance(poly2, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for poly2, got {type(poly2)}")
+        if not len(poly1) == len(poly2):
+            raise ValueError("Both polynomials must have the same length for addition.")
+
+        result = [0] * len(poly1) # initialize result polynomial
+        for i in range(len(poly1)):
+            result[i] = (poly1[i] + poly2[i]) % self.q
+
+        return result
+    
+    def AddPolynomialVectors(self, vec1: list, vec2: list) -> list:
+        """
+        Adds two vectors of polynomials coefficient-wise.
+        Args:
+            vec1 (list): First vector of polynomials (list of lists of ints).
+            vec2 (list): Second vector of polynomials (list of lists of ints).
+        Returns:
+
+            result (list): The resulting vector of polynomials after addition.
+        Raises:
+            TypeError: If the inputs are not lists or tuples.
+        """
+        if not isinstance(vec1, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for vec1, got {type(vec1)}")
+        if not isinstance(vec2, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for vec2, got {type(vec2)}")
+        if not len(vec1) == len(vec2):
+            raise ValueError("Both vectors must have the same length for addition.")
+        
+        result = [[0] * self.N for _ in range(len(vec1))] # initialize result vector
+        for i in range(len(vec1)):
+            result[i] = self.AddPolynomials(vec1[i], vec2[i])
+        return result
+
+    def multiply_matrix_vector(self, matrix: list, vector: list) -> list:
+        """
+        Multiplies a matrix of polynomials with a vector of polynomials in NTT domain.
+        Args:
+            matrix (list): A matrix of polynomials (list of lists of ints) in NTT domain.
+            vector (list): A vector of polynomials (list of ints) in NTT domain.
+        Returns:
+            result (list): The resulting vector of polynomials after multiplication in NTT domain.
+        Raises:
+            TypeError: If the inputs are not lists or tuples.
+            ValueError: If the dimensions of the matrix and vector are incompatible.
+        """
+        if not isinstance(matrix, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for matrix, got {type(matrix)}")
+        if not isinstance(vector, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for vector, got {type(vector)}")
+        if len(matrix) == 0 or len(matrix[0]) != len(vector):
+            raise ValueError("Incompatible dimensions for matrix-vector multiplication.")
+
+        result = [[0] * self.N for _ in range(len(matrix))] # initialize product of A_cap and NTT(s1)
+        for i in range(len(matrix)):
+            for j in range(len(vector)):
+                element_product = self.MultiplyNTT(matrix[i][j], vector[j])
+                result[i] = self.AddNTT(result[i], element_product)
+
+        return result
+
+    def multiply_polynomial_vector(self, poly: list, vector: list) -> list:
+        """
+        Multiplies a polynomial with a vector of polynomials in NTT domain.
+        Args:
+            poly (list): A polynomial (list of ints) in NTT domain.
+            vector (list): A vector of polynomials (list of lists of ints) in NTT domain.
+        Returns:
+            result (list): The resulting vector of polynomials after multiplication in NTT domain.
+        Raises:
+            TypeError: If the inputs are not lists or tuples.
+            ValueError: If the dimensions of the polynomial and vector are incompatible.
+        """
+        if not isinstance(poly, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for poly, got {type(poly)}")
+        if not isinstance(vector, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for vector, got {type(vector)}")
+        if len(vector) == 0 or len(vector[0]) != len(poly):
+            raise ValueError("Incompatible dimensions for polynomial-vector multiplication.")
+
+        result = [[0] * self.N for _ in range(len(vector))] # initialize product of poly and vector
+        for j in range(len(vector)):
+            element_product = self.MultiplyNTT(poly, vector[j])
+            for i in range(self.N):
+                result[j][i] = element_product[i] % self.q
+
+        return result
+    
+    def multiply_scalar_vector(self, scalar: int, vector: list) -> list:
+        """
+        Multiplies a scalar with a vector of polynomials in NTT domain.
+        Args:
+            scalar (int): A scalar integer.
+            vector (list): A vector of polynomials (list of lists of ints) in NTT domain.
+        Returns:
+            result (list): The resulting vector of polynomials after multiplication in NTT domain.
+        Raises:
+            TypeError: If the inputs are not lists or tuples.
+        """
+        if not isinstance(vector, (list, tuple)):
+            raise TypeError(f"Expected a list or tuple for vector, got {type(vector)}")
+        if not isinstance(scalar, int):
+            raise TypeError(f"Expected an integer for scalar, got {type(scalar)}")
+
+        result = [[0] * self.N for _ in range(len(vector))] # initialize product of scalar and vector
+        for j in range(len(vector)):
+            for i in range(self.N):
+                result[j][i] = (scalar * vector[j][i]) % self.q
+
+        return result
 
     def power2round(self, r: int) -> tuple[int, int]:
         """
